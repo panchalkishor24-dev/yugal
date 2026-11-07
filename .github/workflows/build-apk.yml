@@ -1,0 +1,67 @@
+name: Build Yugal APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+
+concurrency:
+  group: apk-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Flutter (stable)
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Show versions
+        run: flutter --version
+
+      # The android/ folder is generated here, so it is not stored in the repo.
+      - name: Generate Android project
+        run: flutter create --platforms=android --org in.yugal --project-name yugal .
+
+      - name: Configure manifest (app name + internet permission)
+        run: |
+          MANIFEST=android/app/src/main/AndroidManifest.xml
+          sed -i 's#android:label="[^"]*"#android:label="Yugal"#' "$MANIFEST"
+          if ! grep -q 'android.permission.INTERNET' "$MANIFEST"; then
+            sed -i 's#<application#<uses-permission android:name="android.permission.INTERNET"/>\n    <application#' "$MANIFEST"
+          fi
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      # Shows problems in the log but never blocks the APK.
+      - name: Analyze code
+        run: flutter analyze
+        continue-on-error: true
+
+      - name: Build release APK
+        run: flutter build apk --release --build-name=1.0.0 --build-number=${{ github.run_number }}
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: yugal-apk-${{ github.run_number }}
+          path: build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+          retention-days: 30
